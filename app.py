@@ -11,9 +11,29 @@ from authomatic import Authomatic
 from utils import AioAdapter, login_user, login_required
 import config
 
+from pymongo import MongoClient
+
 
 authomatic = Authomatic(config.OAUTH_CONFIG, str(config.SECRET))
+db = None
 
+def insertUser(user_obj):
+    print("in insertUser()")
+    client = MongoClient()
+    db = client.test
+
+    result = db.users.find({"name": user_obj.name})
+    if not result:
+        result = db.users.insert_one({
+                    "name": user_obj.name
+                }
+            )
+        print("new record inserted: ", result.inserted_id)
+    else:
+        print("record found!")
+        for entry in result:
+            print(entry)
+    
 
 @coroutine
 def login(request):
@@ -21,8 +41,13 @@ def login(request):
     response = web.Response()
     result = authomatic.login(AioAdapter(request, response), provider)
     if result and result.user:
+        response.body = b"User login successfully!"
         result.user.update()
         user_obj = result.user
+        print(user_obj)
+        #insert user into db
+        insertUser(user_obj)
+        
         provider_id = "%s:%s" % (provider, user_obj.id)
         email = user_obj.email
         gender = int(user_obj.gender == 'male') # 1 for male and 0 for female
@@ -30,7 +55,8 @@ def login(request):
         fullname = user_obj.name
         print(provider_id, email, gender, fullname)
         yield from login_user(request, provider_id)
-        response.body = b"Hello world"
+        response.body += bytes(" Hello " + fullname, encoding="UTF-8")
+    
     return response
 
 
@@ -43,6 +69,7 @@ def secret(request):
 
 @coroutine
 def init(loop):
+    print("In init()")
     app = web.Application(
         # loop=loop,
         middlewares=[session_middleware(EncryptedCookieStorage(config.SECRET))],
@@ -51,14 +78,14 @@ def init(loop):
     app.router.add_route('GET', '/secret', secret)
     srv = yield from loop.create_server(
         app.make_handler(),
-        'auth.xchtest.com',
+        'auth.tuhao.com',
         8080,
     )
-    print("Server started")
+    print("Server started", srv.sockets[0].getsockname())
     return srv
 
-
 if __name__ == '__main__':
+    #create asyncio loop
     loop = asyncio.get_event_loop()
     loop.run_until_complete(init(loop))
     loop.run_forever()
